@@ -1,7 +1,10 @@
 from pathlib import Path
 from .utils import read_text_file
 
-def train_bpe_tokenizer(input_path: Path, vocab_size: int, special_tokens: list[str]) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+
+def train_bpe_tokenizer(
+    input_path: Path, vocab_size: int, special_tokens: list[str]
+) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     """
     Train a BPE tokenizer on the given input file.
 
