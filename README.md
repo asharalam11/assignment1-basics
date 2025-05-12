@@ -48,3 +48,16 @@ gunzip owt_valid.txt.gz
 cd ..
 ```
 
+### Development
+Run pre-commit to ensure file formatting
+
+Install `pre-commit-uv`: 
+```
+uv tool install pre-commit --with pre-commit-uv --force-reinstall
+```
+
+Running pre-commit
+```
+uv run --with pre-commit-uv pre-commit run --all-files
+```
+
