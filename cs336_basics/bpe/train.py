@@ -134,14 +134,22 @@ def bpe_merge(pretoken_counts: dict[bytes, int], vocab: dict[int, bytes], vocab_
             skip_idx= False
             new_pretoken = ()
             for idx, (i, j) in enumerate(zip(pretoken, pretoken[1:])):
+                # I really wanted to use zip hence had to use this
+                # Easier index manipulation could have been done with a while loop
                 if skip_idx:
                     skip_idx=False
                     continue
                 
                 pair = b"".join((i, j))
                 if new_token == pair:
-                    prefix = pretoken[:idx]
-                    suffix = pretoken[idx + 2:]
+                    if new_pretoken:
+                        # Extract the new indices for prefix and suffixfrom this pretoken with one less as 
+                        # idx has moved cz of the merge even after the skip but only for the prefix, suffix
+                        prefix = new_pretoken[:idx-1]
+                        suffix = new_pretoken[idx + 1:]
+                    else:
+                        prefix = pretoken[:idx]
+                        suffix = pretoken[idx + 2:]
                     new_pretoken = prefix + (new_token,) + suffix
                     if prefix:
                         old_left_pair = (prefix[-1], i)
@@ -200,7 +208,7 @@ def train_bpe_tokenizer(
 
     file_content = read_text_file(input_path)
 
-    print("Length of file content:", len(file_content))
-    print("First 100 bytes of file content:", file_content[:100])
-    print("Special tokens:", special_tokens)
+    # print("Length of file content:", len(file_content))
+    # print("First 100 bytes of file content:", file_content[:100])
+    # print("Special tokens:", special_tokens)
     return vocab, merges
