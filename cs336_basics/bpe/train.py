@@ -21,13 +21,13 @@ def initialize_vocabulary(
     Returns:
         dict[int, bytes]: Mapping from token IDs to byte strings.
     """
-    assert vocab_size > (256 + len(special_tokens)), (
+    assert vocab_size >= (256 + len(special_tokens)), (
         f"Vocabulary size must be greater than {256 + len(special_tokens)}, but got {vocab_size}."
     )
 
     # Create a mapping from IDs to byte strings
-    vocab = {i: chr(i).encode("utf-8") for i in range(256)}
-
+    vocab = {i: bytes([i]) for i in range(256)}
+    
     # Create a mapping from token IDs to byte strings
     vocab.update({i + 256: token.encode("utf-8") for i, token in enumerate(special_tokens)})
     
@@ -46,7 +46,7 @@ def remove_special_tokens(chunk_str: str, special_tokens: list[str]) -> str:
     """
     # Split on special tokens
     split_chunk = re.split("|".join(re.escape(token) for token in special_tokens), chunk_str)
-    
+
     return " ".join(split_chunk)
 
 def run_pretokenization(input_path: Path, special_tokens: list[str], num_chunks: int) -> dict[bytes, int]:
@@ -69,7 +69,9 @@ def run_pretokenization(input_path: Path, special_tokens: list[str], num_chunks:
         
         # The following is a serial implementation, but you can parallelize this 
         # by sending each start/end pair to a set of processes.
+        i = 0
         for start, end in zip(boundaries[:-1], boundaries[1:]):
+            i += 1
             f.seek(start)
 
             chunk = f.read(end - start).decode("utf-8", errors="ignore")
@@ -79,16 +81,17 @@ def run_pretokenization(input_path: Path, special_tokens: list[str], num_chunks:
 
             # Run pre-tokenization on your chunk and store the counts for each pre-token
             chunk_iterator = re.finditer(pattern=PAT, string=chunk)
+
             while True:
                 try:
                     word = next(chunk_iterator).group(0)
-                    word_as_bytes = tuple(ch.encode("utf-8") for ch in word)
+                    word_as_bytes = tuple(bytes([b]) for b in word.encode("utf-8"))
                     pretoken_counts.update({word_as_bytes: pretoken_counts.get(word_as_bytes, 0) + 1})
+                    
                 except StopIteration:
                     break
             # TODO: Remove once ready to test the whole program
-            break
-        
+            print("Processing chunk #: ", i)
     return pretoken_counts
 
 def bpe_merge(pretoken_counts: dict[bytes, int], vocab: dict[int, bytes], vocab_size: int) -> tuple[dict[int, bytes], list[bytes]]:
@@ -106,9 +109,9 @@ def bpe_merge(pretoken_counts: dict[bytes, int], vocab: dict[int, bytes], vocab_
 
     # Construct pair frequency from the pretoken counts
     pair_counts = {}
-    for pretoken in pretoken_counts:
+    for pretoken, count in pretoken_counts.items():
         for i, j in zip(pretoken, pretoken[1:]):
-            pair_counts[(i, j)] = pair_counts.get((i, j), 0) + 1
+            pair_counts[(i, j)] = pair_counts.get((i, j), 0) + count
     
     # print("Pair frequency table: ", pair_counts)
 
@@ -118,7 +121,7 @@ def bpe_merge(pretoken_counts: dict[bytes, int], vocab: dict[int, bytes], vocab_
     num_merges = vocab_size - len(vocab)
     for _ in tqdm(range(num_merges)):
         # Find the most frequent pair
-        most_freq = max(pair_counts, key=pair_counts.get)
+        most_freq = max(pair_counts, key= lambda k: (pair_counts.get(k), k))
 
         merges.append(most_freq)
 
@@ -128,29 +131,37 @@ def bpe_merge(pretoken_counts: dict[bytes, int], vocab: dict[int, bytes], vocab_
         # Perform merges (two loops - 1. Over the pretoken counts 2. Over each pretoken -> update both pretoken_counts and pair_counts)
         updated_pretoken_count = {}
         for pretoken, count in pretoken_counts.items():
+            skip_idx= False
+            new_pretoken = ()
             for idx, (i, j) in enumerate(zip(pretoken, pretoken[1:])):
+                if skip_idx:
+                    skip_idx=False
+                    continue
+                
                 pair = b"".join((i, j))
                 if new_token == pair:
                     prefix = pretoken[:idx]
                     suffix = pretoken[idx + 2:]
-                    pretoken = prefix + (new_token,) + suffix
+                    new_pretoken = prefix + (new_token,) + suffix
                     if prefix:
                         old_left_pair = (prefix[-1], i)
-                        # TODO: Remove the if for debugging
-                        if old_left_pair in pair_counts:
-                            pair_counts[old_left_pair] -= count
+                        pair_counts[old_left_pair] -= count
                         new_left_pair = (prefix[-1], pair)
-                        pair_counts.update({new_left_pair: pair_counts.get(new_left_pair, 0) + 1})
+                        pair_counts.update({new_left_pair: pair_counts.get(new_left_pair, 0) + count})
                     if suffix:
                         old_right_pair = (j, suffix[0])
-                        if old_right_pair in pair_counts:
-                            pair_counts[old_right_pair] -= count
+                        pair_counts[old_right_pair] -= count
                         new_right_pair = (pair, suffix[0])
-                        pair_counts.update({new_right_pair: pair_counts.get(new_right_pair, 0)+1})
+                        pair_counts.update({new_right_pair: pair_counts.get(new_right_pair, 0)+count})
 
                     pair_counts[most_freq] -= count
+                    skip_idx = True
 
-            updated_pretoken_count[pretoken] = count
+            if new_pretoken:
+                updated_pretoken_count[new_pretoken] = count
+            else:
+                updated_pretoken_count[pretoken] = count
+
         pretoken_counts = updated_pretoken_count
 
     return vocab, merges
@@ -176,12 +187,12 @@ def train_bpe_tokenizer(
     vocab = initialize_vocabulary(special_tokens, vocab_size)
 
     # Step 2: Read the input file and pretokenize it
-    pretoken_counts = run_pretokenization(input_path=input_path, special_tokens=special_tokens, num_chunks=50)
+    pretoken_counts = run_pretokenization(input_path=input_path, special_tokens=special_tokens, num_chunks=10)
     # print(pretoken_counts)
     # Step 3: BPE merge loop
     vocab, merges = bpe_merge(pretoken_counts=pretoken_counts, vocab=vocab, vocab_size=vocab_size)
-    print(vocab)
-    print(merges)
+    # print(vocab)
+    # print(merges)
     # Step 4: Assign token IDs
 
     # Step 5: Return the vocabulary and merges
@@ -192,4 +203,4 @@ def train_bpe_tokenizer(
     print("Length of file content:", len(file_content))
     print("First 100 bytes of file content:", file_content[:100])
     print("Special tokens:", special_tokens)
-    return vocab
+    return vocab, merges
