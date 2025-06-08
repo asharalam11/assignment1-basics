@@ -14,7 +14,7 @@ def main():
     parser.add_argument(
         "--vocab_size",
         type=int,
-        default=10000,
+        default=500,
         help="Size of the vocabulary.",
     )
     parser.add_argument(
