@@ -47,6 +47,7 @@ def test_train_bpe():
             )
             for merge_token_1, merge_token_2 in gpt2_reference_merges
         ]
+
     assert merges == reference_merges
 
     # Compare the vocab to the expected output vocab
@@ -58,9 +59,10 @@ def test_train_bpe():
         }
     # Rather than checking that the vocabs exactly match (since they could
     # have been constructed differently, we'll make sure that the vocab keys and values match)
+
     assert set(vocab.keys()) == set(reference_vocab.keys())
     assert set(vocab.values()) == set(reference_vocab.values())
-
+    
 
 def test_train_bpe_special_tokens(snapshot):
     """
@@ -78,6 +80,12 @@ def test_train_bpe_special_tokens(snapshot):
     vocabs_without_specials = [word for word in vocab.values() if word != b"<|endoftext|>"]
     for word_bytes in vocabs_without_specials:
         assert b"<|" not in word_bytes
+
+    with open("/Users/ashar/workspace/learning/cs336/assignment1-basics/tests/_snapshots/test_train_bpe_special_tokens.pkl", "rb") as f:
+        import pickle
+        data = pickle.load(f)
+
+    vocab_dict = {key: value for key, value in zip(data["vocab_keys"], data["vocab_values"])}
 
     snapshot.assert_match(
         {

@@ -8,6 +8,36 @@ from .pretokenization_example import find_chunk_boundaries
 # Pretokenization Regex pattern
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
+
+
+"""
+The above PAT leads to pretokenization like this
+Pretoken:  (b'\n', b'\n', b'\n')
+Pretoken:  (b'\n', b'\n', b'\n')
+Pretoken:  (b'\n', b'\n')
+Pretoken:  (b' ', b'\n', b' ')
+Pretoken:  (b' ', b'\n', b' ')
+Pretoken:  (b'\n', b'\n', b' ')
+Pretoken:  (b'\n', b'\n', b' ')
+Pretoken:  (b' ', b'\n')
+Pretoken:  (b' ', b'\n', b'\n')
+Pretoken:  (b' ', b'\n', b'\n')
+Pretoken:  (b' ', b'\n', b'\n', b'\n')
+Pretoken:  (b' ', b'\n', b'\n', b'\n')
+Pretoken:  (b' ', b'\n', b'\n', b'\n')
+Pretoken:  (b'\n', b' ')
+Pretoken:  (b' ', b'\n', b'\n', b' ')
+Pretoken:  (b' ', b'\n', b'\n', b' ')
+Pretoken:  (b' ', b'\n', b'\n', b' ')
+
+which creates an error in the pytest
+uv run pytest tests/test_train_bpe.py::test_train_bpe_special_tokens
+
+we get an extra merge due to pretokenization: {(b'\n\n', b'\n')}
+
+"""
+
+
 def initialize_vocabulary(
     special_tokens: list[str], vocab_size: int
 ) -> dict[int, bytes]:
@@ -47,7 +77,7 @@ def remove_special_tokens(chunk_str: str, special_tokens: list[str]) -> str:
     # Split on special tokens
     split_chunk = re.split("|".join(re.escape(token) for token in special_tokens), chunk_str)
 
-    return " ".join(split_chunk)
+    return "".join(split_chunk)
 
 def run_pretokenization(input_path: Path, special_tokens: list[str], num_chunks: int) -> dict[bytes, int]:
     """
@@ -82,16 +112,16 @@ def run_pretokenization(input_path: Path, special_tokens: list[str], num_chunks:
             # Run pre-tokenization on your chunk and store the counts for each pre-token
             chunk_iterator = re.finditer(pattern=PAT, string=chunk)
 
-            while True:
-                try:
-                    word = next(chunk_iterator).group(0)
-                    word_as_bytes = tuple(bytes([b]) for b in word.encode("utf-8"))
-                    pretoken_counts.update({word_as_bytes: pretoken_counts.get(word_as_bytes, 0) + 1})
-                    
-                except StopIteration:
-                    break
+            for match in chunk_iterator:
+                word = match.group(0)
+                
+                encoded = word.encode("utf-8")
+                word_as_bytes = tuple(bytes([b]) for b in encoded)
+                pretoken_counts[word_as_bytes] = pretoken_counts.get(word_as_bytes, 0) + 1
+
             # TODO: Remove once ready to test the whole program
             print("Processing chunk #: ", i)
+            
     return pretoken_counts
 
 def bpe_merge(pretoken_counts: dict[bytes, int], vocab: dict[int, bytes], vocab_size: int) -> tuple[dict[int, bytes], list[bytes]]:
@@ -111,6 +141,9 @@ def bpe_merge(pretoken_counts: dict[bytes, int], vocab: dict[int, bytes], vocab_
     pair_counts = {}
     for pretoken, count in pretoken_counts.items():
         for i, j in zip(pretoken, pretoken[1:]):
+            # Debug unit test: tests/test_train_bpe.py::test_train_bpe_special_tokens
+            # if i == b'\n' or j == b'\n':
+            #     print("Pretoken: ", pretoken)
             pair_counts[(i, j)] = pair_counts.get((i, j), 0) + count
     
     # print("Pair frequency table: ", pair_counts)
@@ -195,7 +228,7 @@ def train_bpe_tokenizer(
     vocab = initialize_vocabulary(special_tokens, vocab_size)
 
     # Step 2: Read the input file and pretokenize it
-    pretoken_counts = run_pretokenization(input_path=input_path, special_tokens=special_tokens, num_chunks=10)
+    pretoken_counts = run_pretokenization(input_path=input_path, special_tokens=special_tokens, num_chunks=1)
     # print(pretoken_counts)
     # Step 3: BPE merge loop
     vocab, merges = bpe_merge(pretoken_counts=pretoken_counts, vocab=vocab, vocab_size=vocab_size)
