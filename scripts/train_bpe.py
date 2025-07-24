@@ -1,6 +1,8 @@
 from argparse import ArgumentParser
 
 from cs336_basics.bpe.train import train_bpe_tokenizer
+from cs336_basics.bpe.utils import save_vocab_and_merges
+
 from pathlib import Path
 
 def main():
@@ -24,10 +26,18 @@ def main():
         default=["<pad>", "<unk>", "<s>", "</s>"],
         help="List of special tokens to be used.",
     )
+    parser.add_argument(
+        "--output_dir",
+        type=Path,
+        default=Path("data/out"),
+        help="Output directory",
+    )
+    
 
     args = parser.parse_args()
 
-    train_bpe_tokenizer(args.input_path, args.vocab_size, args.special_tokens)
+    vocab, merges = train_bpe_tokenizer(args.input_path, args.vocab_size, args.special_tokens)
+    save_vocab_and_merges(vocab=vocab, merges=merges, output_dir=args.output_dir)
 
 if __name__ == "__main__":
     main()
