@@ -1,5 +1,6 @@
 import regex as re
 
+from multiprocessing import Pool
 from pathlib import Path
 from tqdm import tqdm
 from .utils import read_text_file
@@ -79,7 +80,33 @@ def remove_special_tokens(chunk_str: str, special_tokens: list[str]) -> str:
 
     return "".join(split_chunk)
 
-def run_pretokenization(input_path: Path, special_tokens: list[str], num_chunks: int) -> dict[bytes, int]:
+def process_chunk(args: tuple[str, int, int, list[str]]) -> dict[tuple[bytes, ...], int]:
+    input_path, start, end, special_tokens = args
+    pretoken_counts = {}
+
+    with open(input_path, "rb") as f:
+        f.seek(start)
+        chunk = f.read(end - start).decode("utf-8", errors="ignore")
+
+    chunk = remove_special_tokens(chunk_str=chunk, special_tokens=special_tokens)
+    chunk_iterator = re.finditer(pattern=PAT, string=chunk)
+
+    for match in chunk_iterator:
+        word = match.group(0)
+        encoded = word.encode("utf-8")
+        word_as_bytes = tuple(bytes([b]) for b in encoded)
+        pretoken_counts[word_as_bytes] = pretoken_counts.get(word_as_bytes, 0) + 1
+
+    return pretoken_counts
+
+def merge_dicts(dicts: list[dict[tuple[bytes, ...], int]]) -> dict[tuple[bytes, ...], int]:
+    merged = {}
+    for d in dicts:
+        for k, v in d.items():
+            merged[k] = merged.get(k, 0) + v
+    return merged
+
+def run_multiprocess_pretokenization(input_path: Path, special_tokens: list[str], num_chunks: int) -> dict[bytes, int]:
     """
     Chunk the file at boundaries and run pretokenization
 
@@ -91,6 +118,38 @@ def run_pretokenization(input_path: Path, special_tokens: list[str], num_chunks:
     Returns:
         dict[str, int]: Pretokenization counts
     """
+    pretoken_counts = {}
+
+    with open(input_path, "rb") as f:
+        boundaries = find_chunk_boundaries(f, num_chunks, b"<|endoftext|>")
+
+    args_list = [
+        (str(input_path), start, end, special_tokens)
+        for start, end in zip(boundaries[:-1], boundaries[1:])
+    ]
+
+    with Pool(num_chunks) as pool:
+        results = pool.map(process_chunk, args_list)
+
+    pretoken_counts = merge_dicts(results)
+    return pretoken_counts
+
+def run_pretokenization(input_path: Path, special_tokens: list[str], num_chunks: int, enable_multiprocess:bool=False) -> dict[bytes, int]:
+    """
+    Chunk the file at boundaries and run pretokenization
+
+    Args:  
+        input_path (Path): Input file path
+        special_tokens (list[str]): List of special tokens
+        num_chunks (int): Number of chunks to be made
+        enable_multiprocess (bool): Handle chunks in multiple processes or a single process
+
+    Returns:
+        dict[str, int]: Pretokenization counts
+    """
+
+    if enable_multiprocess:
+        return run_multiprocess_pretokenization(input_path, special_tokens, num_chunks)
 
     pretoken_counts = {}
 
@@ -119,7 +178,6 @@ def run_pretokenization(input_path: Path, special_tokens: list[str], num_chunks:
                 word_as_bytes = tuple(bytes([b]) for b in encoded)
                 pretoken_counts[word_as_bytes] = pretoken_counts.get(word_as_bytes, 0) + 1
 
-            # TODO: Remove once ready to test the whole program
             print("Processing chunk #: ", i)
             
     return pretoken_counts
@@ -209,7 +267,7 @@ def bpe_merge(pretoken_counts: dict[bytes, int], vocab: dict[int, bytes], vocab_
     
 
 def train_bpe_tokenizer(
-    input_path: Path, vocab_size: int, special_tokens: list[str]
+    input_path: Path, vocab_size: int, special_tokens: list[str], num_chunks: int=1, enable_multiprocess: bool=False
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     """
     Train a BPE tokenizer on the given input file.
@@ -228,7 +286,7 @@ def train_bpe_tokenizer(
     vocab = initialize_vocabulary(special_tokens, vocab_size)
 
     # Step 2: Read the input file and pretokenize it
-    pretoken_counts = run_pretokenization(input_path=input_path, special_tokens=special_tokens, num_chunks=1)
+    pretoken_counts = run_pretokenization(input_path=input_path, special_tokens=special_tokens, num_chunks=num_chunks, enable_multiprocess=enable_multiprocess)
     # print(pretoken_counts)
     # Step 3: BPE merge loop
     vocab, merges = bpe_merge(pretoken_counts=pretoken_counts, vocab=vocab, vocab_size=vocab_size)

@@ -1,3 +1,5 @@
+import cProfile
+
 from argparse import ArgumentParser
 
 from cs336_basics.bpe.train import train_bpe_tokenizer
@@ -20,6 +22,12 @@ def main():
         help="Size of the vocabulary.",
     )
     parser.add_argument(
+        "--num_process",
+        type=int,
+        default=1,
+        help="Number of processes.",
+    )
+    parser.add_argument(
         "--special_tokens",
         type=str,
         nargs="+",
@@ -32,11 +40,23 @@ def main():
         default=Path("data/out"),
         help="Output directory",
     )
+    parser.add_argument(
+        "--enable_multiprocess",
+        action="store_true",
+        help="Enable multiprocess or not"
+    )
     
 
     args = parser.parse_args()
 
-    vocab, merges = train_bpe_tokenizer(args.input_path, args.vocab_size, args.special_tokens)
+    # Training BPE
+    pr = cProfile.Profile()
+    pr.enable()
+    vocab, merges = train_bpe_tokenizer(args.input_path, args.vocab_size, args.special_tokens, args.num_process, args.enable_multiprocess)
+    pr.disable()
+
+    pr.print_stats(sort='time')
+
     save_vocab_and_merges(vocab=vocab, merges=merges, output_dir=args.output_dir)
 
 if __name__ == "__main__":
