@@ -1,0 +1,5 @@
+uv run python scripts/train_bpe.py --input_path  --enable_multiprocess  10    594.93s user 8.87s system 754% cpu 1:19.98 total
+uv run python scripts/train_bpe.py --input_path  --enable_multiprocess  100    623.60s user 12.62s system 751% cpu 1:24.70 total
+
+# No enable_multiprocess
+uv run python scripts/train_bpe.py --input_path  --enable_multiprocess  10    1046.92s user 8.86s system 207% cpu 8:28.82 total
